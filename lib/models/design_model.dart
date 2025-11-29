@@ -7,7 +7,7 @@ class DesignModel {
   final double price;
   final String imageUrl;
   final String publicId;
-  
+  final bool isActive;
 
   DesignModel({
     required this.id,
@@ -17,6 +17,7 @@ class DesignModel {
     required this.price,
     required this.imageUrl,
     required this.publicId,
+    required this.isActive,
   });
 
   factory DesignModel.fromMap(String id, Map<String, dynamic> data) {
@@ -28,6 +29,7 @@ class DesignModel {
       price: (data['precio'] ?? 0).toDouble(),
       imageUrl: data['imageUrl'] ?? '',
       publicId: data['publicId'] ?? '',
+      isActive: data['isActive'] ?? true,
     );
   }
 }

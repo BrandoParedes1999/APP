@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:paulette/screens/citas_admin.dart';
+import 'package:paulette/screens/estadistica_admin.dart';
 import 'package:paulette/screens/manicure/manicura_admin.dart';
 import 'package:paulette/screens/pago_admin.dart';
 import 'package:paulette/screens/pedicura/pedicura_admin.dart';
-import 'package:paulette/screens/reportemenu_admin.dart';
 import 'package:paulette/services/servicio_mapa.dart';
 import 'package:paulette/services/auth_service.dart';
 
@@ -237,7 +237,7 @@ class _MenuAdminState extends State<MenuAdmin> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => ReportemenuAdmin()),
+                        MaterialPageRoute(builder: (context) => EstadisticaAdmin()),
                       );
                     },
                   ),

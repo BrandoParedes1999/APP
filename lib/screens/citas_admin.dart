@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/appointment.dart';
 import '../services/appointment_service.dart';
+import '../models/user_model.dart';
+import '../services/user_service.dart';
 
 class AdminAppointmentsPanel extends StatefulWidget {
   const AdminAppointmentsPanel({super.key});
@@ -13,12 +15,19 @@ class AdminAppointmentsPanel extends StatefulWidget {
 class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
     with SingleTickerProviderStateMixin {
   final AppointmentService _appointmentService = AppointmentService();
+  final UserService _userService = UserService();
   late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+
+    // 🧹 EJECUTAR LIMPIEZA SILENCIOSA
+    // Usamos addPostFrameCallback para no bloquear la construcción de la UI
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _appointmentService.deleteOldAppointments();
+    });
   }
 
   @override
@@ -44,18 +53,232 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
     }
   }
 
-  /// ✅ Aprobar cita
-  Future<void> _approveAppointment(String appointmentId) async {
-    final success = await _appointmentService.updateStatus(
-      appointmentId,
+  // =======================================================
+  // 🛡️ NUEVO: Lógica de Bloqueo de Horario
+  // =======================================================
+  void _showBlockTimeDialog() {
+    final dateCtrl = TextEditingController();
+    final reasonCtrl = TextEditingController();
+    DateTime? selectedDate;
+    String? startTime;
+    String? endTime;
+    bool isFullDay = false;
+
+    // Usamos la lista maestra del servicio para evitar errores de texto
+    final List<String> adminTimeSlots = AppointmentService.timeSlots;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text("Bloquear Agenda"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: reasonCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Motivo (ej. Vacaciones)",
+                      prefixIcon: Icon(
+                        Icons.info_outline,
+                        color: Colors.blueGrey,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: dateCtrl,
+                    readOnly: true,
+                    decoration: const InputDecoration(
+                      labelText: "Fecha",
+                      prefixIcon: Icon(
+                        Icons.calendar_month,
+                        color: Colors.pinkAccent,
+                      ),
+                    ),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (date != null) {
+                        setDialogState(() {
+                          selectedDate = date;
+                          dateCtrl.text = DateFormat('dd/MM/yyyy').format(date);
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    title: const Text(
+                      "Bloquear todo el día",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    value: isFullDay,
+                    activeColor: Colors.red,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setDialogState(() {
+                        isFullDay = val;
+                        if (val) {
+                          startTime = null;
+                          endTime = null;
+                        }
+                      });
+                    },
+                  ),
+                  if (!isFullDay) ...[
+                    const Divider(),
+                    const Text(
+                      "Rango de Horas",
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            hint: const Text(
+                              "Inicio",
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            value: startTime,
+                            items: adminTimeSlots
+                                .map(
+                                  (t) => DropdownMenuItem(
+                                    value: t,
+                                    child: Text(
+                                      t,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) =>
+                                setDialogState(() => startTime = v),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            hint: const Text(
+                              "Fin",
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            value: endTime,
+                            items: adminTimeSlots
+                                .where(
+                                  (t) =>
+                                      startTime == null ||
+                                      adminTimeSlots.indexOf(t) >=
+                                          adminTimeSlots.indexOf(startTime!),
+                                )
+                                .map(
+                                  (t) => DropdownMenuItem(
+                                    value: t,
+                                    child: Text(
+                                      t,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) => setDialogState(() => endTime = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancelar"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  if (selectedDate == null || reasonCtrl.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Completa fecha y motivo")),
+                    );
+                    return;
+                  }
+                  if (!isFullDay && startTime == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Selecciona hora de inicio"),
+                      ),
+                    );
+                    return;
+                  }
+
+                  await _appointmentService.blockTimeSlots(
+                    date: selectedDate!,
+                    reason: reasonCtrl.text.trim(),
+                    blockFullDay: isFullDay,
+                    startTime: startTime,
+                    endTime: endTime ?? startTime,
+                  );
+
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Bloqueo aplicado")),
+                    );
+                  }
+                },
+                child: const Text("Bloquear"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // =======================================================
+  // Funcionalidad 5: Ajuste de Duración/Precio al Aprobar
+  // =======================================================
+
+  /// ✅ Aprobar cita (MODIFICADO para mostrar diálogo de ajuste)
+  Future<void> _approveAppointment(Appointment appointment) async {
+    final result = await _showApprovalDialog(
+      context,
+      appointment.price,
+      appointment.description,
+    );
+
+    if (result == null || !mounted) return;
+
+    final success = await _appointmentService.updateStatusAndDetails(
+      appointment.id,
       "approved",
+      result['price'] as double,
+      result['duration'] as int,
     );
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            success ? "Cita aprobada exitosamente" : "Error al aprobar cita",
+            success
+                ? "Cita aprobada y detalles ajustados"
+                : "Error al aprobar cita",
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -63,7 +286,7 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
     }
   }
 
-  /// ❌ Rechazar cita
+  /// ❌ Rechazar cita (o eliminar bloqueo)
   Future<void> _rejectAppointment(String appointmentId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -113,74 +336,38 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            success ? "Cita marcada como completada" : "Error al completar",
-          ),
+          content: Text(success ? "Cita completada" : "Error al completar"),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
     }
   }
 
-  /// 📊 Estadísticas
-  Widget _buildStatistics(List<Appointment> appointments) {
-    final pending = appointments.where((a) => a.status == "pending").length;
-    final approved = appointments.where((a) => a.status == "approved").length;
-    final completed = appointments.where((a) => a.status == "completed").length;
-    final totalRevenue = appointments
-        .where((a) => a.status == "completed")
-        .fold(0.0, (sum, a) => sum + a.price);
-
-    return Container(
-      padding: const EdgeInsets.all(15),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  title: "Pendientes",
-                  value: "$pending",
-                  color: Colors.orange,
-                  icon: Icons.pending_outlined,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _StatCard(
-                  title: "Aprobadas",
-                  value: "$approved",
-                  color: Colors.blue,
-                  icon: Icons.check_circle_outline,
-                ),
-              ),
-            ],
+  // 🧹 Lógica para eliminar un bloqueo (Borrado directo)
+  Future<void> _deleteBlock(String appointmentId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("¿Desbloquear Horario?"),
+        content: const Text(
+          "Este horario volverá a estar disponible para clientes.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Cancelar"),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  title: "Completadas",
-                  value: "$completed",
-                  color: Colors.green,
-                  icon: Icons.verified_outlined,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _StatCard(
-                  title: "Ingresos",
-                  value: "\$${totalRevenue.toStringAsFixed(0)}",
-                  color: Colors.pinkAccent,
-                  icon: Icons.attach_money,
-                ),
-              ),
-            ],
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Desbloquear"),
           ),
         ],
       ),
     );
+
+    if (confirm == true) {
+      await _appointmentService.deleteAppointment(appointmentId);
+    }
   }
 
   /// 📋 Lista de citas según filtro
@@ -197,14 +384,19 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return const Center(
             child: Text(
-              "No hay citas registradas",
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              "No hay registros",
+              style: TextStyle(color: Colors.grey),
             ),
           );
         }
 
-        // Filtrar según el tab
         List<Appointment> filtered = snapshot.data!;
+
+        // Filtro especial: Si estamos en la pestaña "Todas", mostramos todo.
+        // Si no, filtramos por estado.
+        // PERO: Los bloqueos (blocked) solo los mostramos en "Todas" o en una pestaña especial si quisieras.
+        // Aquí los mostraremos en "Todas" y "Pendientes" (opcional) o filtraremos blocked si no queremos verlos en listas normales.
+
         if (status != "all") {
           filtered = filtered.where((a) => a.status == status).toList();
         }
@@ -212,8 +404,8 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
         if (filtered.isEmpty) {
           return const Center(
             child: Text(
-              "No hay citas con este estado",
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              "Sin datos en esta categoría",
+              style: TextStyle(color: Colors.grey),
             ),
           );
         }
@@ -225,13 +417,110 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
             final appointment = filtered[index];
             return _AppointmentCard(
               appointment: appointment,
-              onApprove: () => _approveAppointment(appointment.id),
+              onApprove: () => _approveAppointment(appointment),
               onReject: () => _rejectAppointment(appointment.id),
               onComplete: () => _completeAppointment(appointment.id),
+              onUnblock: () =>
+                  _deleteBlock(appointment.id), // Nueva callback para bloqueos
+              userService: _userService,
             );
           },
         );
       },
+    );
+  }
+
+  // =======================================================
+  // Dialogo de Ajuste de Precio/Duración
+  // =======================================================
+  Future<Map<String, dynamic>?> _showApprovalDialog(
+    BuildContext context,
+    double originalPrice,
+    String? clientDescription,
+  ) async {
+    final priceController = TextEditingController(
+      text: originalPrice.toStringAsFixed(2),
+    );
+    final durationController = TextEditingController(text: '60');
+
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Aprobar y Ajustar Cita"),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Notas del Cliente:",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                clientDescription != null && clientDescription.isNotEmpty
+                    ? clientDescription
+                    : "No hay notas adicionales.",
+                style: const TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey,
+                ),
+              ),
+              const Divider(),
+              const SizedBox(height: 10),
+              const Text(
+                "Duración Final (Minutos)",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              TextField(
+                controller: durationController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  hintText: "Ej. 60",
+                  prefixIcon: Icon(Icons.access_time),
+                ),
+              ),
+              const SizedBox(height: 15),
+              const Text(
+                "Precio Final (\$)",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              TextField(
+                controller: priceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  hintText: "Costo total",
+                  prefixText: "\$",
+                  prefixIcon: Icon(Icons.attach_money),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text("Cancelar"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final price = double.tryParse(priceController.text);
+              final duration = int.tryParse(durationController.text);
+              if (price == null ||
+                  duration == null ||
+                  price <= 0 ||
+                  duration <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Ingresa valores válidos")),
+                );
+                return;
+              }
+              Navigator.pop(context, {'price': price, 'duration': duration});
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text("Aprobar Cita"),
+          ),
+        ],
+      ),
     );
   }
 
@@ -247,6 +536,14 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
         backgroundColor: Colors.pinkAccent,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          // 🛑 BOTÓN PARA BLOQUEAR HORARIO
+          IconButton(
+            icon: const Icon(Icons.block, color: Colors.white),
+            tooltip: "Bloquear Horario",
+            onPressed: _showBlockTimeDialog,
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
@@ -261,88 +558,13 @@ class _AdminAppointmentsPanelState extends State<AdminAppointmentsPanel>
           ],
         ),
       ),
-      body: Column(
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          // 📊 ESTADÍSTICAS
-          StreamBuilder<List<Appointment>>(
-            stream: _appointmentService.getAllAppointments(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const SizedBox.shrink();
-              }
-              return _buildStatistics(snapshot.data!);
-            },
-          ),
-
-          const Divider(height: 1),
-
-          // 📋 CONTENIDO DE TABS
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildAppointmentsList("all"),
-                _buildAppointmentsList("pending"),
-                _buildAppointmentsList("approved"),
-                _buildAppointmentsList("completed"),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Widget de tarjeta de estadística
-class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final Color color;
-  final IconData icon;
-
-  const _StatCard({
-    required this.title,
-    required this.value,
-    required this.color,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          _buildAppointmentsList("all"),
+          _buildAppointmentsList("pending"),
+          _buildAppointmentsList("approved"),
+          _buildAppointmentsList("completed"),
         ],
       ),
     );
@@ -352,15 +574,19 @@ class _StatCard extends StatelessWidget {
 /// Widget de tarjeta de cita
 class _AppointmentCard extends StatelessWidget {
   final Appointment appointment;
-  final VoidCallback onApprove;
+  final UserService userService;
+  final Function() onApprove;
   final VoidCallback onReject;
   final VoidCallback onComplete;
+  final VoidCallback onUnblock; // Nuevo callback para desbloquear
 
   const _AppointmentCard({
     required this.appointment,
+    required this.userService,
     required this.onApprove,
     required this.onReject,
     required this.onComplete,
+    required this.onUnblock,
   });
 
   Color _getStatusColor(String status) {
@@ -371,6 +597,8 @@ class _AppointmentCard extends StatelessWidget {
         return Colors.blue;
       case "completed":
         return Colors.green;
+      case "blocked":
+        return Colors.grey; // Color para bloqueado
       default:
         return Colors.red;
     }
@@ -384,6 +612,8 @@ class _AppointmentCard extends StatelessWidget {
         return "Aprobada";
       case "completed":
         return "Completada";
+      case "blocked":
+        return "Bloqueado";
       default:
         return "Cancelada";
     }
@@ -391,215 +621,311 @@ class _AppointmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
+    // ⚠️ CASO ESPECIAL: Si está BLOQUEADO, mostramos una tarjeta simple
+    if (appointment.status == "blocked") {
+      return Card(
+        color: Colors.grey.shade200,
+        margin: const EdgeInsets.only(bottom: 15),
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListTile(
+          leading: const CircleAvatar(
+            backgroundColor: Colors.redAccent,
+            child: Icon(Icons.block, color: Colors.white),
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Header con imagen
-          Stack(
+          title: Text(
+            "Bloqueo: ${appointment.designTitle}",
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          subtitle: Text(
+            "${DateFormat('dd/MM/yyyy').format(appointment.date)} - ${appointment.time}",
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.grey),
+            tooltip: "Desbloquear",
+            onPressed: onUnblock, // Llama a la función de borrado
+          ),
+        ),
+      );
+    }
+
+    // TARJETA NORMAL PARA CITAS DE CLIENTES
+    return FutureBuilder<UserModel?>(
+      future: userService.getUserById(appointment.userId),
+      builder: (context, snapshot) {
+        final UserModel? user = snapshot.data;
+
+        final bool hasDiabetes =
+            (user?.tieneDiabetes.toLowerCase() == 'sí' ||
+            user?.tieneDiabetes.toLowerCase() == 'si');
+        final bool hasAlergy =
+            (user?.tieneAlergia.toLowerCase() == 'sí' ||
+            user?.tieneAlergia.toLowerCase() == 'si');
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 15),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+            ],
+          ),
+          child: Column(
             children: [
-              ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(12)),
-                child: Image.network(
-                  appointment.imageUrl,
-                  height: 120,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              Positioned(
-                top: 10,
-                right: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(appointment.status),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Text(
-                    _getStatusText(appointment.status),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+              // Header con imagen y Badges
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12),
+                    ),
+                    child: Image.network(
+                      appointment.imageUrl,
+                      height: 120,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (ctx, err, stack) => Container(
+                        height: 120,
+                        color: Colors.grey.shade300,
+                        child: const Icon(
+                          Icons.broken_image,
+                          color: Colors.grey,
+                        ),
+                      ),
                     ),
                   ),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(appointment.status),
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Text(
+                        _getStatusText(appointment.status),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (hasDiabetes)
+                    const Positioned(
+                      bottom: 10,
+                      left: 10,
+                      child: _HealthBadge(
+                        text: "⚠️ DIABETES",
+                        color: Colors.red,
+                      ),
+                    ),
+                  if (hasAlergy)
+                    Positioned(
+                      bottom: hasDiabetes ? 35 : 10,
+                      left: 10,
+                      child: const _HealthBadge(
+                        text: "💊 ALERGIA",
+                        color: Colors.orange,
+                      ),
+                    ),
+                ],
+              ),
+
+              // Información
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            appointment.designTitle,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          "\$${appointment.price.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.pinkAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(Icons.person, size: 16, color: Colors.grey),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            user != null
+                                ? user.nombre
+                                : appointment.userName ?? "Cliente",
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          DateFormat('dd/MM/yyyy').format(appointment.date),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        const SizedBox(width: 15),
+                        const Icon(
+                          Icons.access_time,
+                          size: 16,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          appointment.time,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    if (appointment.description != null &&
+                        appointment.description!.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          "Notas: ${appointment.description!}",
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black87,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _buildActionButtons(),
+                  ],
                 ),
               ),
             ],
           ),
-
-          // Información
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Título y precio
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        appointment.designTitle,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(
-                      "\$${appointment.price.toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.pinkAccent,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-
-                // Cliente
-                Row(
-                  children: [
-                    const Icon(Icons.person, size: 16, color: Colors.grey),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Text(
-                        appointment.userName ?? "Cliente",
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 5),
-
-                // Fecha y hora
-                Row(
-                  children: [
-                    const Icon(Icons.calendar_today, size: 16, color: Colors.grey),
-                    const SizedBox(width: 5),
-                    Text(
-                      DateFormat('dd/MM/yyyy').format(appointment.date),
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    const SizedBox(width: 15),
-                    const Icon(Icons.access_time, size: 16, color: Colors.grey),
-                    const SizedBox(width: 5),
-                    Text(
-                      appointment.time,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ],
-                ),
-
-                // Descripción
-                if (appointment.description != null &&
-                    appointment.description!.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      appointment.description!,
-                      style: const TextStyle(fontSize: 12, color: Colors.black87),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-
-                // Botones de acción
-                const SizedBox(height: 12),
-                _buildActionButtons(),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
   Widget _buildActionButtons() {
-    switch (appointment.status.toLowerCase()) {
-      case "pending":
-        return Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: onApprove,
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text("Aprobar"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+    if (appointment.status == "pending") {
+      return Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: onApprove,
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text("Aprobar"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onReject,
-                icon: const Icon(Icons.close, size: 18),
-                label: const Text("Rechazar"),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: const BorderSide(color: Colors.red),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-
-      case "approved":
-        return SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: onComplete,
-            icon: const Icon(Icons.verified, size: 18),
-            label: const Text("Marcar como Completada"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
               ),
             ),
           ),
-        );
-
-      default:
-        return const SizedBox.shrink();
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onReject,
+              icon: const Icon(Icons.close, size: 18),
+              label: const Text("Rechazar"),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else if (appointment.status == "approved") {
+      return SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: onComplete,
+          icon: const Icon(Icons.verified, size: 18),
+          label: const Text("Marcar como Completada"),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      );
     }
+    return const SizedBox.shrink();
+  }
+}
+
+/// Helper para el Badge de Alerta Sanitaria
+class _HealthBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _HealthBadge({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
   }
 }

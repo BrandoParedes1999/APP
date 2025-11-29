@@ -37,6 +37,80 @@ class _ManicuraAdminState extends State<ManicuraAdmin> {
     "Natural",
   ];
 
+  // NUEVA FUNCIÓN: Alternar el estado activo
+  Future<void> _toggleDesignStatus(
+      String designId, bool currentStatus) async {
+    try {
+      // Se asume que DesignService tiene la función toggleActiveStatus
+      await _designService.toggleActiveStatus(
+          designId, !currentStatus); 
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              !currentStatus
+                  ? "Diseño Activado (Visible al cliente)"
+                  : "Diseño Desactivado (Oculto al cliente)",
+            ),
+            backgroundColor: !currentStatus ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error al cambiar estado: $e")),
+        );
+      }
+    }
+  }
+
+  // Lógica de eliminación (código existente)
+  Future<void> _deleteDesign(DesignModel design) async {
+    final confirmar = await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("¿Eliminar diseño?"),
+        content: const Text(
+            "Esta acción eliminará el diseño y su imagen permanentemente."),
+        actions: [
+          TextButton(
+            child: const Text("Cancelar"),
+            onPressed: () => Navigator.pop(context, false),
+          ),
+          TextButton(
+            child: const Text("Eliminar", style: TextStyle(color: Colors.red)),
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    try {
+      if (design.publicId.isNotEmpty) {
+        // Asumiendo que CloudinaryService tiene la función deleteImage
+        await CloudinaryService.deleteImage(design.publicId);
+      }
+
+      await _designService.deleteDesign(design.id);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Diseño eliminado")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -147,28 +221,19 @@ class _ManicuraAdminState extends State<ManicuraAdmin> {
 
                 List<DesignModel> designs = snapshot.data!;
 
-                // FILTRAR POR BÚSQUEDA
+                // APLICAR FILTROS DE BÚSQUEDA, TEMPORADA y CATEGORÍA
                 designs = designs.where((d) {
                   final titleMatch = d.title.toLowerCase().contains(searchQuery);
-                  return titleMatch;
+                  
+                  final seasonMatch = selectedSeason == "Todas" ||
+                      d.season.toLowerCase() == selectedSeason.toLowerCase();
+
+                  final categoryMatch = selectedCategory == "Todas" ||
+                      d.categories.any((cat) => 
+                          cat.toLowerCase() == selectedCategory.toLowerCase());
+                      
+                  return titleMatch && seasonMatch && categoryMatch;
                 }).toList();
-
-                // FILTRAR POR TEMPORADA
-                if (selectedSeason != "Todas") {
-                  designs = designs.where((d) {
-                    return d.season.toLowerCase() == selectedSeason.toLowerCase();
-                  }).toList();
-                }
-
-                // 👇 FILTRAR POR CATEGORÍA
-                if (selectedCategory != "Todas") {
-                  designs = designs.where((d) {
-                    // Verificar si la categoría seleccionada está en la lista de categorías del diseño
-                    return d.categories.any((cat) => 
-                      cat.toLowerCase() == selectedCategory.toLowerCase()
-                    );
-                  }).toList();
-                }
 
                 if (designs.isEmpty) {
                   return const Center(
@@ -191,15 +256,45 @@ class _ManicuraAdminState extends State<ManicuraAdmin> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          ClipRRect(
-                            borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(16)),
-                            child: Image.network(
-                              design.imageUrl,
-                              height: 180,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
+                          // IMAGEN Y BADGE DE ESTATUS
+                          Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(16)),
+                                child: Image.network(
+                                  design.imageUrl,
+                                  height: 180,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              // BADGE DE ESTATUS (ACTIVO/INACTIVO)
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: design.isActive
+                                        ? Colors.green
+                                        : Colors.red,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    design.isActive ? "ACTIVO" : "INACTIVO",
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
 
                           Padding(
@@ -276,51 +371,34 @@ class _ManicuraAdminState extends State<ManicuraAdmin> {
                                       ),
                                       label: const Text("Eliminar",
                                           style: TextStyle(color: Colors.red)),
-                                      onPressed: () async {
-                                        final confirmar = await showDialog(
-                                          context: context,
-                                          builder: (_) => AlertDialog(
-                                            title: const Text("¿Eliminar diseño?"),
-                                            content: const Text(
-                                                "Esta acción no se puede deshacer."),
-                                            actions: [
-                                              TextButton(
-                                                child: const Text("Cancelar"),
-                                                onPressed: () =>
-                                                    Navigator.pop(context, false),
-                                              ),
-                                              TextButton(
-                                                child: const Text(
-                                                  "Eliminar",
-                                                  style: TextStyle(color: Colors.red),
-                                                ),
-                                                onPressed: () =>
-                                                    Navigator.pop(context, true),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-
-                                        if (confirmar != true) return;
-
-                                        try {
-                                          if (design.publicId.isNotEmpty) {
-                                            await CloudinaryService.deleteImage(
-                                                design.publicId);
-                                          }
-
-                                          await _designService.deleteDesign(design.id);
-
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(const SnackBar(
-                                                  content: Text("Diseño eliminado")));
-                                        } catch (e) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(SnackBar(
-                                                  content: Text("Error: $e")));
-                                        }
-                                      },
+                                      onPressed: () => _deleteDesign(design),
                                     ),
+                                  ],
+                                ),
+
+                                const Divider(height: 1), 
+
+                                // TOGGLE DE ACTIVIDAD (ACTIVO/INACTIVO)
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      "Mostrar al Cliente",
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: design.isActive
+                                              ? Colors.green
+                                              : Colors.red),
+                                    ),
+                                    Switch(
+                                      value: design.isActive,
+                                      onChanged: (newStatus) =>
+                                          _toggleDesignStatus(
+                                              design.id, design.isActive),
+                                      activeColor: Colors.green,
+                                      inactiveThumbColor: Colors.red,
+                                    )
                                   ],
                                 )
                               ],

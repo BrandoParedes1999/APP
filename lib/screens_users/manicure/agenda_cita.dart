@@ -29,21 +29,11 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
 
   DateTime? selectedDate;
   String? selectedTime;
+  
+  // Variables de control de estado
   bool isLoading = false;
-
-  // Horarios disponibles (9 AM - 6 PM)
-  final List<String> availableTimes = [
-    "09:00 AM",
-    "10:00 AM",
-    "11:00 AM",
-    "12:00 PM",
-    "01:00 PM",
-    "02:00 PM",
-    "03:00 PM",
-    "04:00 PM",
-    "05:00 PM",
-    "06:00 PM",
-  ];
+  bool isLoadingSlots = false;
+  List<String> _occupiedTimes = []; 
 
   @override
   void dispose() {
@@ -51,7 +41,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     super.dispose();
   }
 
-  /// 📅 Seleccionar fecha
+  // 📅 AL SELECCIONAR FECHA: Consultamos BD
   Future<void> _selectDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -61,12 +51,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Colors.pinkAccent,
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: Colors.black,
-            ),
+            colorScheme: const ColorScheme.light(primary: Colors.pinkAccent, onPrimary: Colors.white),
           ),
           child: child!,
         );
@@ -76,35 +61,51 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
     if (picked != null) {
       setState(() {
         selectedDate = picked;
-        selectedTime = null; // Reset time when date changes
+        selectedTime = null; 
+        _occupiedTimes = []; // Limpiar para no mostrar datos viejos
+        isLoadingSlots = true; // Mostrar spinner
       });
+
+      // 🔍 Consulta real a Firestore
+      try {
+        final occupied = await _appointmentService.getOccupiedTimeSlots(picked);
+        setState(() {
+          _occupiedTimes = occupied;
+        });
+      } catch (e) {
+        print("Error: $e");
+      } finally {
+        setState(() => isLoadingSlots = false);
+      }
     }
   }
 
-  /// ✅ Confirmar cita
   Future<void> _confirmAppointment() async {
-    // Validaciones
-    if (selectedDate == null) {
-      _showError("Por favor selecciona una fecha");
-      return;
+    if (selectedDate == null || selectedTime == null) {
+      _showError("Selecciona fecha y hora"); return;
     }
-
-    if (selectedTime == null) {
-      _showError("Por favor selecciona una hora");
-      return;
-    }
-
-    // Obtener usuario actual
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      _showError("Debes iniciar sesión para agendar una cita");
-      return;
+      _showError("Inicia sesión para continuar"); return;
     }
 
     setState(() => isLoading = true);
 
     try {
-      // Crear cita
+      // Doble verificación de seguridad
+      final isAvailable = await _appointmentService.isTimeSlotAvailable(selectedDate!, selectedTime!);
+      if (!isAvailable) {
+        _showError("¡Ups! Ese horario acaba de ocuparse.");
+        // Refrescar visualmente
+        final occupied = await _appointmentService.getOccupiedTimeSlots(selectedDate!);
+        setState(() {
+          _occupiedTimes = occupied;
+          selectedTime = null;
+          isLoading = false;
+        });
+        return;
+      }
+
       final appointment = Appointment(
         id: const Uuid().v4(),
         userId: user.uid,
@@ -121,59 +122,27 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       );
 
       final success = await _appointmentService.createAppointment(appointment);
-
       if (success && mounted) {
         _showSuccessDialog();
       } else if (mounted) {
-        _showError("Error al crear la cita. Intenta nuevamente.");
+        _showError("Error al agendar.");
       }
     } catch (e) {
-      if (mounted) {
-        _showError("Error: $e");
-      }
+      if (mounted) _showError("Error: $e");
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
+  void _showError(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
 
   void _showSuccessDialog() {
     showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green, size: 30),
-            SizedBox(width: 10),
-            Text("¡Cita Agendada!"),
-          ],
-        ),
-        content: const Text(
-          "Tu cita ha sido agendada exitosamente. Te notificaremos cuando sea confirmada.",
-          style: TextStyle(fontSize: 15),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context); // Cerrar diálogo
-              Navigator.pop(context); // Volver a la pantalla anterior
-            },
-            child: const Text("Aceptar"),
-          ),
-        ],
+      context: context, barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [Icon(Icons.check_circle, color: Colors.green), SizedBox(width: 10), Text("¡Listo!")]),
+        content: const Text("Tu cita ha sido enviada."),
+        actions: [TextButton(onPressed: () {Navigator.pop(ctx); Navigator.pop(ctx);}, child: const Text("Aceptar"))],
       ),
     );
   }
@@ -182,211 +151,79 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text(
-          "Agendar Cita",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.pinkAccent,
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: const Text("Agendar Cita"), backgroundColor: Colors.pinkAccent, foregroundColor: Colors.white),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 🖼️ IMAGEN DEL DISEÑO
-            Container(
-              width: double.infinity,
-              height: 250,
-              decoration: BoxDecoration(
-                image: DecorationImage(
-                  image: NetworkImage(widget.imageUrl),
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-
+            Container(width: double.infinity, height: 250, decoration: BoxDecoration(image: DecorationImage(image: NetworkImage(widget.imageUrl), fit: BoxFit.cover))),
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 📌 TÍTULO Y PRECIO
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.designTitle,
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.pinkAccent,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          "\$${widget.price.toStringAsFixed(2)}",
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Expanded(child: Text(widget.designTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8), decoration: BoxDecoration(color: Colors.pinkAccent, borderRadius: BorderRadius.circular(20)), child: Text("\$${widget.price.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))),
+                  ]),
                   const SizedBox(height: 30),
-
-                  // 📅 SELECCIONAR FECHA
-                  const Text(
-                    "Selecciona una fecha",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  
+                  const Text("Selecciona una fecha", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
                   InkWell(
                     onTap: _selectDate,
                     child: Container(
-                      padding: const EdgeInsets.all(15),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.calendar_today, color: Colors.pinkAccent),
-                          const SizedBox(width: 15),
-                          Text(
-                            selectedDate == null
-                                ? "Seleccionar fecha"
-                                : DateFormat('dd/MM/yyyy').format(selectedDate!),
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: selectedDate == null
-                                  ? Colors.grey
-                                  : Colors.black,
-                            ),
-                          ),
-                        ],
-                      ),
+                      padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
+                      child: Row(children: [
+                        const Icon(Icons.calendar_today, color: Colors.pinkAccent), const SizedBox(width: 15),
+                        Text(selectedDate == null ? "Toca para elegir fecha" : DateFormat('dd/MM/yyyy').format(selectedDate!), style: const TextStyle(fontSize: 16)),
+                      ]),
                     ),
                   ),
-
                   const SizedBox(height: 25),
 
-                  // 🕐 SELECCIONAR HORA
-                  const Text(
-                    "Selecciona una hora",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  const Text("Horarios Disponibles", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: availableTimes.map((time) {
-                      final isSelected = time == selectedTime;
-                      return GestureDetector(
-                        onTap: selectedDate == null
-                            ? null
-                            : () => setState(() => selectedTime = time),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? Colors.pinkAccent
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isSelected
-                                  ? Colors.pinkAccent
-                                  : Colors.grey.shade300,
+                  
+                  if (isLoadingSlots)
+                    const Center(child: CircularProgressIndicator(color: Colors.pinkAccent))
+                  else
+                    Wrap(
+                      spacing: 10, runSpacing: 10,
+                      // ⚠️ USAR LA LISTA DEL SERVICIO PARA COINCIDENCIA EXACTA
+                      children: AppointmentService.timeSlots.map((time) {
+                        final isSelected = time == selectedTime;
+                        final isOccupied = _occupiedTimes.contains(time);
+
+                        return GestureDetector(
+                          onTap: (selectedDate == null || isOccupied) ? null : () => setState(() => selectedTime = time),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: isOccupied ? Colors.grey.shade300 : (isSelected ? Colors.pinkAccent : Colors.white),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: isOccupied ? Colors.transparent : (isSelected ? Colors.pinkAccent : Colors.grey.shade300)),
                             ),
-                          ),
-                          child: Text(
-                            time,
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.black87,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-
-                  const SizedBox(height: 25),
-
-                  // 📝 NOTAS ADICIONALES (OPCIONAL)
-                  const Text(
-                    "Notas adicionales (opcional)",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _descriptionController,
-                    maxLines: 3,
-                    decoration: InputDecoration(
-                      hintText: "Agrega cualquier detalle especial...",
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // ✅ BOTÓN CONFIRMAR
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton(
-                      onPressed: isLoading ? null : _confirmAppointment,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.pinkAccent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 2,
-                      ),
-                      child: isLoading
-                          ? const SizedBox(
-                              height: 25,
-                              width: 25,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2.5,
-                              ),
-                            )
-                          : const Text(
-                              "Confirmar Cita",
+                            child: Text(
+                              time,
                               style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+                                color: isOccupied ? Colors.grey.shade600 : (isSelected ? Colors.white : Colors.black87),
+                                fontWeight: FontWeight.w600,
+                                decoration: isOccupied ? TextDecoration.lineThrough : null,
                               ),
                             ),
+                          ),
+                        );
+                      }).toList(),
                     ),
-                  ),
+
+                  const SizedBox(height: 25),
+                  const Text("Notas (Opcional)", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  TextField(controller: _descriptionController, maxLines: 3, decoration: InputDecoration(hintText: "Detalles...", filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
+                  const SizedBox(height: 30),
+                  
+                  SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: isLoading ? null : _confirmAppointment, style: ElevatedButton.styleFrom(backgroundColor: Colors.pinkAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text("Confirmar Reserva", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
                 ],
               ),
             ),
