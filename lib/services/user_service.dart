@@ -66,4 +66,14 @@ class UserService {
       return false;
     }
   }
+  /// 🔹 Obtener TODOS los clientes (para el Admin)
+  Stream<List<UserModel>> getAllClients() {
+    return _db
+        .collection("users")
+        .where("isAdmin", isEqualTo: false) // Solo clientes
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList();
+    });
+  }
 }

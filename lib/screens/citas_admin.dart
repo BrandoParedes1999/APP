@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/appointment.dart';
 import '../services/appointment_service.dart';
 import '../models/user_model.dart';
@@ -589,6 +591,94 @@ class _AppointmentCard extends StatelessWidget {
     required this.onUnblock,
   });
 
+  // 🔹 LÓGICA WHATSAPP INTELIGENTE
+  void _handleWhatsApp(BuildContext context, UserModel user) {
+    final phone1 = user.telefono.replaceAll(RegExp(r'[^0-9]'), '');
+    final phone2 = user.telefono2.replaceAll(RegExp(r'[^0-9]'), '');
+
+    // MENSAJE PERSONALIZADO
+    final message =
+        "Hola ${user.nombre}, te escribimos de Paulette Salón respecto a tu cita del ${DateFormat('dd/MM').format(appointment.date)} a las ${appointment.time}.";
+
+    if (phone1.isEmpty && phone2.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Cliente sin teléfono registrado")),
+      );
+      return;
+    }
+
+    if (phone1.isNotEmpty && phone2.isEmpty) {
+      _launchWhatsAppUrl(phone1, message);
+      return;
+    }
+
+    if (phone1.isEmpty && phone2.isNotEmpty) {
+      _launchWhatsAppUrl(phone2, message);
+      return;
+    }
+
+    // Dos números: Preguntar
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Wrap(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(15.0),
+              child: Center(
+                child: Text(
+                  "Contactar Cliente",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const FaIcon(
+                FontAwesomeIcons.whatsapp,
+                color: Colors.green,
+              ),
+              title: Text("Principal: ${user.telefono}"),
+              onTap: () {
+                Navigator.pop(context);
+                _launchWhatsAppUrl(phone1, message);
+              },
+            ),
+            ListTile(
+              leading: const FaIcon(
+                FontAwesomeIcons.whatsapp,
+                color: Colors.teal,
+              ),
+              title: Text("Respaldo: ${user.telefono2}"),
+              onTap: () {
+                Navigator.pop(context);
+                _launchWhatsAppUrl(phone2, message);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _launchWhatsAppUrl(String phone, String message) async {
+    // Código de país +52 para México (ajustable)
+    final url = Uri.parse(
+      "https://wa.me/+52$phone?text=${Uri.encodeComponent(message)}",
+    );
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        throw 'No se pudo abrir WhatsApp';
+      }
+    } catch (e) {
+      print("Error WhatsApp: $e");
+    }
+  }
+
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case "pending":
@@ -772,6 +862,8 @@ class _AppointmentCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 10),
+
+                    // FILA DEL CLIENTE CON BOTÓN DE WHATSAPP
                     Row(
                       children: [
                         const Icon(Icons.person, size: 16, color: Colors.grey),
@@ -784,8 +876,22 @@ class _AppointmentCard extends StatelessWidget {
                             style: const TextStyle(fontSize: 13),
                           ),
                         ),
+                        // 🟢 BOTÓN WHATSAPP AQUÍ
+                        if (user != null)
+                          IconButton(
+                            icon: const FaIcon(
+                              FontAwesomeIcons.whatsapp,
+                              color: Colors.green,
+                              size: 24,
+                            ),
+                            tooltip: "Contactar por WhatsApp",
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _handleWhatsApp(context, user),
+                          ),
                       ],
                     ),
+
                     const SizedBox(height: 5),
                     Row(
                       children: [
@@ -812,10 +918,12 @@ class _AppointmentCard extends StatelessWidget {
                         ),
                       ],
                     ),
+
                     if (appointment.description != null &&
                         appointment.description!.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Container(
+                        width: double.infinity,
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.grey[100],

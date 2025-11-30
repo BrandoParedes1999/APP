@@ -99,8 +99,10 @@ class _ManicureDesignsPageState extends State<ManicureDesignsPage> {
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection("manicure_designs")
+                  .where('isActive', isEqualTo: true) // <--- SOLO LOS ACTIVOS
                   .orderBy("createdAt", descending: true)
                   .snapshots(),
+                  
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(

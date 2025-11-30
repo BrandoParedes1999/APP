@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:paulette/screens/citas_admin.dart';
+import 'package:paulette/screens/clientes_admin.dart';
 import 'package:paulette/screens/estadistica_admin.dart';
 import 'package:paulette/screens/manicure/manicura_admin.dart';
+import 'package:paulette/screens/marketing_admin.dart';
 import 'package:paulette/screens/pago_admin.dart';
 import 'package:paulette/screens/pedicura/pedicura_admin.dart';
+import 'package:paulette/screens/settings_admin.dart';
 import 'package:paulette/services/servicio_mapa.dart';
 import 'package:paulette/services/auth_service.dart';
 
@@ -36,10 +39,7 @@ class _MenuAdminState extends State<MenuAdmin> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: Text(
-                'Cancelar',
-                style: TextStyle(color: Colors.grey),
-              ),
+              child: Text('Cancelar', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(context).pop(true),
@@ -199,7 +199,9 @@ class _MenuAdminState extends State<MenuAdmin> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => ManicuraAdmin()),
+                        MaterialPageRoute(
+                          builder: (context) => ManicuraAdmin(),
+                        ),
                       );
                     },
                   ),
@@ -211,7 +213,9 @@ class _MenuAdminState extends State<MenuAdmin> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => PedicuraAdmin()),
+                        MaterialPageRoute(
+                          builder: (context) => PedicuraAdmin(),
+                        ),
                       );
                     },
                   ),
@@ -237,7 +241,41 @@ class _MenuAdminState extends State<MenuAdmin> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => EstadisticaAdmin()),
+                        MaterialPageRoute(
+                          builder: (context) => EstadisticaAdmin(),
+                        ),
+                      );
+                    },
+                  ),
+
+                  _buildMenuCard(
+                    context,
+                    icon: Icons.campaign,
+                    title: "Marketing y\nPromociones",
+                    gradient: [Colors.purple.shade300, Colors.purple.shade100],
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const MarketingAdmin(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildMenuCard(
+                    context,
+                    icon: Icons.people_alt,
+                    title: "Mis\nClientes",
+                    gradient: [
+                      Color(0xFFFF9800),
+                      Color(0xFFFFB74D),
+                    ], // Color naranja para diferenciar
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ClientesAdmin(),
+                        ),
                       );
                     },
                   ),
@@ -272,7 +310,9 @@ class _MenuAdminState extends State<MenuAdmin> {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => UbicacionOsmScreen()),
+                      MaterialPageRoute(
+                        builder: (context) => UbicacionOsmScreen(),
+                      ),
                     );
                   },
                 ),
@@ -292,9 +332,15 @@ class _MenuAdminState extends State<MenuAdmin> {
                   context,
                   icon: Icons.settings,
                   label: "Ajustes",
-                  color: Color(0xFF66BB6A),
+                  color: const Color(0xFF66BB6A),
                   onTap: () {
-                    // Implementar navegación a ajustes
+                    // ✅ AHORA NAVEGA A AJUSTES
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const SettingsAdmin(),
+                      ),
+                    );
                   },
                 ),
               ],
@@ -340,11 +386,7 @@ class _MenuAdminState extends State<MenuAdmin> {
                 color: Colors.white.withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                icon,
-                size: 40,
-                color: Colors.white,
-              ),
+              child: Icon(icon, size: 40, color: Colors.white),
             ),
             SizedBox(height: 15),
             Padding(
