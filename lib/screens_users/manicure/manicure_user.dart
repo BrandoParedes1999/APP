@@ -1,261 +1,270 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:paulette/component/footer_user.dart';
+import 'package:paulette/models/design_model.dart';
+import 'package:paulette/services/design_service.dart';
 import 'package:paulette/screens_users/manicure/agenda_cita.dart';
-import 'package:paulette/screens_users/menu_client.dart';
 
-class ManicureDesignsPage extends StatefulWidget {
-  const ManicureDesignsPage({super.key});
+class ManicureUserScreen extends StatefulWidget {
+  const ManicureUserScreen({super.key});
 
   @override
-  State<ManicureDesignsPage> createState() => _ManicureDesignsPageState();
+  State<ManicureUserScreen> createState() => _ManicureUserScreenState();
 }
 
-class _ManicureDesignsPageState extends State<ManicureDesignsPage> {
-  String searchText = "";
-  String selectedCategory = "Todas";
+class _ManicureUserScreenState extends State<ManicureUserScreen> {
+  final DesignService _designService = DesignService();
+  
+  String _searchQuery = "";
+  String _selectedCategory = "Todas";
 
-  final List<String> categories = [
-    "Todas",
-    "Flores",
-    "Minimalista",
-    "Acrílico",
-    "3D",
-    "Natural",
+  final List<String> _categories = [
+    "Todas", "Minimalista", "Acrílico", "3D", "Flores", "Natural", "Francesa"
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text(
-          "Diseños de Manicure",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.pinkAccent,
-        foregroundColor: Colors.white,
-      ),
-
-      body: Column(
-        children: [
-          const SizedBox(height: 10),
-
-          // 🔍 BUSCADOR
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 15),
-            child: TextField(
-              decoration: InputDecoration(
-                hintText: "Buscar diseño...",
-                prefixIcon: const Icon(Icons.search),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
+      backgroundColor: Colors.grey[50],
+      body: CustomScrollView(
+        slivers: [
+          // 1. APP BAR FLOTANTE
+          SliverAppBar(
+            expandedHeight: 120,
+            floating: true,
+            pinned: true,
+            backgroundColor: Colors.pinkAccent,
+            flexibleSpace: FlexibleSpaceBar(
+              title: const Text("Diseños de Manicura", 
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.pinkAccent, Colors.pink.shade200],
+                    begin: Alignment.topLeft, 
+                    end: Alignment.bottomRight
+                  ),
                 ),
               ),
-              onChanged: (value) => setState(() => searchText = value),
             ),
           ),
 
-          const SizedBox(height: 10),
-
-          // 🔽 FILTRO POR CATEGORÍA
-          SizedBox(
-            height: 50,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              children: categories.map((cat) {
-                final bool isSelected = cat == selectedCategory;
-                return GestureDetector(
-                  onTap: () => setState(() => selectedCategory = cat),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 5),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    decoration: BoxDecoration(
-                      color: isSelected ? Colors.pinkAccent : Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.pinkAccent),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      cat,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: isSelected ? Colors.white : Colors.pinkAccent,
+          // 2. BUSCADOR Y FILTROS
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(15.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Buscador con Sombra (SOLUCIÓN DEL ERROR)
+                  Material(
+                    elevation: 3,
+                    shadowColor: Colors.grey.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(30),
+                    child: TextField(
+                      onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
+                      decoration: InputDecoration(
+                        hintText: "Buscar diseño (ej. Rosas)...",
+                        prefixIcon: const Icon(Icons.search, color: Colors.pinkAccent),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(30),
+                          borderSide: BorderSide.none
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
+                        // elevation: 2,  <-- ESTO SE ELIMINÓ PORQUE DABA ERROR
                       ),
                     ),
                   ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // 📌 LISTA DE DISEÑOS DESDE FIREBASE
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection("manicure_designs")
-                  .where('isActive', isEqualTo: true) // <--- SOLO LOS ACTIVOS
-                  .orderBy("createdAt", descending: true)
-                  .snapshots(),
+                  const SizedBox(height: 15),
                   
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.pinkAccent),
-                  );
-                }
-
-                final docs = snapshot.data!.docs;
-
-                // 🔎 Aplicar búsqueda
-                final filtered = docs.where((doc) {
-                  final title = doc["nombre"].toString().toLowerCase();
-                  final category = doc["categories"];
-                  final searchMatch = title.contains(searchText.toLowerCase());
-                  final categoryMatch =
-                      selectedCategory == "Todas" ||
-                      category == selectedCategory;
-
-                  return searchMatch && categoryMatch;
-                }).toList();
-
-                if (filtered.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      "No se encontraron diseños",
-                      style: TextStyle(fontSize: 16),
-                    ),
-                  );
-                }
-
-                return GridView.builder(
-                  padding: const EdgeInsets.all(10),
-                  itemCount: filtered.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 15,
-                    crossAxisSpacing: 15,
-                    childAspectRatio: 0.75,
-                  ),
-                  itemBuilder: (context, index) {
-                    final item = filtered[index];
-                    final image = item["imageUrl"];
-                    final title = item["nombre"];
-
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => BookAppointmentScreen(
-                              designId: item.id,
-                              designTitle: item["nombre"],
-                              imageUrl: item["imageUrl"],
-                              price: (item["precio"] is num)
-                                  ? (item["precio"] as num).toDouble()
-                                  : double.tryParse(
-                                          item["precio"].toString(),
-                                        ) ??
-                                        0.0,
+                  // Filtros de Categoría (Horizontal)
+                  SizedBox(
+                    height: 40,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _categories.length,
+                      itemBuilder: (context, index) {
+                        final cat = _categories[index];
+                        final isSelected = _selectedCategory == cat;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: ChoiceChip(
+                            label: Text(cat),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              setState(() => _selectedCategory = cat);
+                            },
+                            selectedColor: Colors.pinkAccent,
+                            labelStyle: TextStyle(
+                              color: isSelected ? Colors.white : Colors.black87,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                            backgroundColor: Colors.white,
+                            side: BorderSide(
+                              color: isSelected ? Colors.transparent : Colors.grey.shade300
                             ),
                           ),
                         );
                       },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: 10,
-                              color: Colors.black.withOpacity(0.08),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ClipRRect(
-                              borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(18),
-                              ),
-                              child: Image.network(
-                                image,
-                                height: 140,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-
-                            // 🔹 NOMBRE
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                top: 8,
-                                left: 10,
-                                right: 10,
-                              ),
-                              child: Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ),
-
-                            // // 🔹 DESCRIPCIÓN (ahora sí activa)
-                            // Padding(
-                            //   padding: const EdgeInsets.symmetric(
-                            //     horizontal: 10,
-                            //     vertical: 4,
-                            //   ),
-                            //   child: Text(
-                            //     //item["descripcion"] ?? "Sin descripción",
-                            //     maxLines: 2,
-                            //     overflow: TextOverflow.ellipsis,
-                            //     style: const TextStyle(
-                            //       fontSize: 12,
-                            //       color: Colors.black54,
-                            //     ),
-                            //   ),
-                            // ),
-
-                            // 🔹 PRECIO
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                left: 10,
-                                bottom: 8,
-                                right: 10,
-                              ),
-                              child: Text(
-                                "\$${item["precio"]}",
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.pinkAccent,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ),
+
+          // 3. GRILLA DE DISEÑOS
+          StreamBuilder<List<DesignModel>>(
+            stream: _designService.getDesigns(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: Colors.pinkAccent)));
+              }
+
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return const SliverFillRemaining(
+                  child: Center(child: Text("No hay diseños disponibles."))
+                );
+              }
+
+              // FILTRADO (Solo activos + búsqueda + categoría)
+              final designs = snapshot.data!.where((d) {
+                final isActive = d.isActive;
+                final matchesSearch = d.title.toLowerCase().contains(_searchQuery);
+                final matchesCategory = _selectedCategory == "Todas" || d.categories.contains(_selectedCategory);
+                
+                return isActive && matchesSearch && matchesCategory;
+              }).toList();
+
+              if (designs.isEmpty) {
+                return const SliverFillRemaining(child: Center(child: Text("No se encontraron resultados")));
+              }
+
+              return SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+                sliver: SliverGrid(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => _DesignCard(design: designs[index]),
+                    childCount: designs.length,
+                  ),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.75,
+                    crossAxisSpacing: 15,
+                    mainAxisSpacing: 15,
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
-      //FOOTER CLIENTE CHICOS
-      persistentFooterButtons: const [FooterMenuClient()],
+    );
+  }
+}
+
+// 🎨 WIDGET DE TARJETA PROFESIONAL
+class _DesignCard extends StatelessWidget {
+  final DesignModel design;
+
+  const _DesignCard({required this.design});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => BookAppointmentScreen(
+              designId: design.id,
+              designTitle: design.title,
+              imageUrl: design.imageUrl,
+              price: design.price,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(15),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // IMAGEN
+            Expanded(
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Image.network(
+                        design.imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image, color: Colors.grey),
+                      ),
+                    ),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          design.season,
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            ),
+            // INFO
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    design.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "\$${design.price.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          color: Colors.pinkAccent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

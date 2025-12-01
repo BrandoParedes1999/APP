@@ -239,4 +239,31 @@ class AppointmentService {
       print("⚠️ Error en limpieza automática: $e");
     }
   }
+
+  // ⭐ NUEVO: Calificar Cita (Rating)
+  // ---------------------------------------------------------
+  Future<void> rateAppointment(String appointmentId, String designId, double rating, String comment) async {
+    try {
+      final WriteBatch batch = _db.batch();
+      
+      // 1. Crear el documento de calificación
+      final ratingRef = _db.collection('ratings').doc();
+      batch.set(ratingRef, {
+        'appointmentId': appointmentId,
+        'designId': designId, // Para saber qué diseño gustó más
+        'rating': rating,
+        'comment': comment,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // 2. Marcar la cita como "ya calificada" para no duplicar
+      final appointmentRef = _db.collection('appointments').doc(appointmentId);
+      batch.update(appointmentRef, {'hasRating': true});
+
+      await batch.commit();
+    } catch (e) {
+      print("🔥 Error al calificar: $e");
+      throw e;
+    }
+  }
 }

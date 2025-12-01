@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:paulette/screens/pago_admin.dart';
-import 'package:paulette/screens_users/manicure/mis_citas.dart';
+import 'package:paulette/screens_users/mis_citas.dart';
 import 'package:paulette/services/servicio_mapa.dart';
 
 class FooterMenuClient extends StatelessWidget {

@@ -6,7 +6,6 @@ import 'package:paulette/screens_users/menu_client.dart';
 import 'package:paulette/screens_users/registre.dart';
 import 'package:paulette/screens/login.dart';
 import 'package:paulette/screens/menu_admin.dart';
-import 'package:paulette/screens_users/payment_client.dart';
 import 'package:paulette/screens_users/location_client.dart';
 
 // Firebase
@@ -48,8 +47,7 @@ class MainApp extends StatelessWidget {
         '/menuadmin': (context) => const MenuAdmin(),
         '/menuclient': (context) => const MenuClient(),
         '/registre': (context) => const Registre(),
-        '/payment': (context) => const Payment(),
-        '/location': (context) => const Ubicacion(),
+       
       },
     );
   }
